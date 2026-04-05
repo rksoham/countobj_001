@@ -1,4 +1,4 @@
-from PIL import Image, ImageFilter, ImageDraw
+import cv2
 import numpy as np
 import os
 import shutil
@@ -14,65 +14,53 @@ def process_and_count(image, filename):
     debug_dir = "output/debug"
     os.makedirs(debug_dir, exist_ok=True)
 
-    # Convert to grayscale
-    gray = image.convert('L')
-    gray.save(f"{debug_dir}/{base_name}_gray.jpg")
+    original = image.copy()
 
-    # Convert to numpy array for processing
-    img_array = np.array(gray)
+    # 1. Grayscale
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    cv2.imshow("Gray", gray)
+    cv2.imwrite(f"{debug_dir}/{base_name}_gray.jpg", gray)
 
-    # Simple thresholding (invert for dark objects on light background)
-    thresh_value = 128  # Simple midpoint threshold
-    thresh = np.where(img_array > thresh_value, 255, 0).astype(np.uint8)
+    # 2. Blur
+    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
 
-    # Save threshold image
-    thresh_img = Image.fromarray(thresh, mode='L')
-    thresh_img.save(f"{debug_dir}/{base_name}_thresh.jpg")
+    # 3. Threshold
+    _, thresh = cv2.threshold(
+        blurred, 0, 255,
+        cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU
+    )
+    cv2.imshow("Threshold", thresh)
+    cv2.imwrite(f"{debug_dir}/{base_name}_thresh.jpg", thresh)
 
-    # Simple blob detection using connected components
-    # This is a basic implementation - count distinct regions
-    height, width = thresh.shape
-    visited = np.zeros_like(thresh, dtype=bool)
+    # 4. Morphology (adaptive kernel)
+    h, w = gray.shape
+    k = max(3, int(min(h, w) / 100))
+    kernel = np.ones((k, k), np.uint8)
+
+    clean = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, kernel, iterations=1)
+
+    # 5. Contours
+    contours, _ = cv2.findContours(
+        clean, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+    )
+
+    # Adaptive area filtering
+    areas = [cv2.contourArea(c) for c in contours]
+    if len(areas) == 0:
+        return original, 0
+
+    avg_area = np.mean(areas)
+    min_area = avg_area * 0.3
+
     count = 0
 
-    def flood_fill(x, y):
-        stack = [(x, y)]
-        while stack:
-            cx, cy = stack.pop()
-            if (cx < 0 or cx >= width or cy < 0 or cy >= height or
-                visited[cy, cx] or thresh[cy, cx] == 255):
-                continue
-            visited[cy, cx] = True
-            # Add neighbors
-            for dx, dy in [(-1,0), (1,0), (0,-1), (0,1)]:
-                stack.append((cx + dx, cy + dy))
+    for c in contours:
+        if cv2.contourArea(c) > min_area:
+            count += 1
+            x, y, w, h = cv2.boundingRect(c)
+            cv2.rectangle(original, (x, y), (x+w, y+h), (0,255,0), 2)
 
-    # Find connected components (dark regions)
-    for y in range(height):
-        for x in range(width):
-            if thresh[y, x] == 0 and not visited[y, x]:  # Dark pixel, not visited
-                flood_fill(x, y)
-                count += 1
-
-    # Draw bounding boxes on original image
-    draw = ImageDraw.Draw(image)
-
-    # Simple approach: divide image into grid and count regions
-    # This is much simpler than contour detection
-    grid_size = 50  # pixels
-    regions_found = []
-
-    for y in range(0, height, grid_size):
-        for x in range(0, width, grid_size):
-            region = thresh[y:min(y+grid_size, height), x:min(x+grid_size, width)]
-            if np.mean(region) < 200:  # Dark region found
-                regions_found.append((x, y, min(x+grid_size, width), min(y+grid_size, height)))
-
-    # Draw rectangles around detected regions
-    for x1, y1, x2, y2 in regions_found:
-        draw.rectangle([x1, y1, x2, y2], outline="red", width=2)
-
-    return image, len(regions_found)
+    return original, count
 
 
 def run_image():
@@ -127,14 +115,10 @@ $OpenFileDialog.filename
         path = os.path.join(INPUT_DIR, file_name)
         shutil.copy(file_path, path)
 
-    img = Image.open(path)
+    img = cv2.imread(path)
 
-    try:
-        # Verify image loaded
-        img.verify()
-        img = Image.open(path)  # Reopen after verify
-    except Exception as e:
-        print(f"Image load failed: {e}")
+    if img is None:
+        print("Image load failed")
         return
 
     output, count = process_and_count(img, file_name)
@@ -144,14 +128,19 @@ $OpenFileDialog.filename
     name, ext = os.path.splitext(file_name)
     out_path = os.path.join(OUTPUT_DIR, f"{name}_output{ext}")
 
-    output.save(out_path)
+    cv2.imwrite(out_path, output)
     print("Saved:", out_path)
 
-    # Show result (PIL can't display windows, so just print info)
-    print(f"Image processed: {output.size} pixels")
-    print("Open the output file to see results")
-    print("Press Enter to continue...")
-    input()
+    # ✅ SHOW RESULT + CLEAN EXIT
+    cv2.imshow("Result", output)
+    print("Press ESC to exit")
+
+    while True:
+        key = cv2.waitKey(1) & 0xFF
+        if key == 27:  # ESC key
+            break
+
+    cv2.destroyAllWindows()
 
 
 if __name__ == "__main__":

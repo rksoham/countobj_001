@@ -28,8 +28,8 @@ A simple Python application that counts objects in images using computer vision 
 
 ### Requirements
 - Python 3.6+
-- Pillow (PIL) - for image processing
-- NumPy - for numerical operations
+- OpenCV (`opencv-python`)
+- NumPy
 - PowerShell (for Windows file picker)
 
 ### Setup
@@ -72,27 +72,26 @@ object-counting/
 
 ### Image Processing Pipeline
 
-1. **Grayscale Conversion** - Convert color image to grayscale using PIL
-2. **Simple Thresholding** - Binary conversion at midpoint (128)
-3. **Connected Component Analysis** - Find connected dark regions
-4. **Grid-based Detection** - Divide image into regions and count dark areas
-5. **Draw & Save** - Add bounding boxes and save result
+1. **Grayscale Conversion** - Convert color image to grayscale
+2. **Gaussian Blur** - Reduce noise with 5x5 kernel
+3. **Otsu Threshold** - Binary conversion with automatic threshold
+4. **Morphological Open** - Remove small noise, clean edges
+5. **Find Contours** - Extract object boundaries
+6. **Filter & Count** - Filter contours by adaptive area threshold
+7. **Draw & Save** - Add bounding boxes and save result
 
-### Detection Method
+### Adaptive Area Filtering
 
-The system uses a simple grid-based approach:
-- Divides the image into 50x50 pixel regions
-- Counts regions that are predominantly dark (below threshold)
-- Draws red rectangles around detected regions
-
-This is much simpler than advanced computer vision but works for basic object counting.
+Objects are counted based on an adaptive threshold that uses the mean contour area:
+- Minimum area = 30% of mean contour area
+- Helps filter noise while preserving real objects
 
 ## Troubleshooting
 
 **No live image preview:**
-- This version uses PIL instead of OpenCV
-- Results are saved to files only
-- Open the output image manually to see results
+- Results are displayed in OpenCV windows
+- Press any key to close windows
+- Output images are saved automatically
 
 **Image not found:**
 - Check that the input image is in a supported format (JPG, PNG, BMP)
